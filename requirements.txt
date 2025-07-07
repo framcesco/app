@@ -1,0 +1,6 @@
+streamlit
+pyvis
+networkx
+python-louvain
+pandas
+openpyxl
