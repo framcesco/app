@@ -148,4 +148,45 @@ def main():
             "Top-down": "UD",
             "Bottom-up": "DU",
             "Left-right": "LR",
-            "Right-left": "R
+            "Right-left": "RL"
+        }
+        direction = direction_map[direction_name]
+    else:
+        direction = "UD"
+
+    expand_neighbors = False
+    # SOLO se sei in modalità "Focus on node & neighbors"
+    if view_mode == "Focus on node & neighbors":
+        expand_neighbors = st.button("Espandi a vicini dei vicini (2 salti dal nodo selezionato)")
+
+    G = build_graph(df, PARENT_COL, CHILD_COL)
+    node_attrs = {n: G.nodes[n] for n in G.nodes}
+    centrality = nx.betweenness_centrality(G)
+    partition = community_louvain.best_partition(G.to_undirected())
+    H = filter_graph(G, selected_node, view_mode, partition, expand_neighbors)
+    display_network(H, selected_node, view_mode, centrality, partition, palette, hierarchy, direction, expand_neighbors, node_attrs)
+
+    # Attributi del nodo selezionato (combo)
+    if selected_node in G.nodes:
+        st.subheader(f"Attributi nodo: {selected_node}")
+        node_data = G.nodes[selected_node]
+        st.json(dict(node_data))
+    else:
+        st.info("Seleziona un nodo per vedere gli attributi.")
+
+    # Visualizza dati tabellari del sottografo attuale
+    with st.expander("Mostra dati tabellari del sottografo attuale"):
+        current_nodes = list(H.nodes)
+        df_sub = df[df[PARENT_COL].isin(current_nodes) | df[CHILD_COL].isin(current_nodes)]
+        st.dataframe(df_sub)
+
+    captions = {
+        "Betweenness Centrality": "Node color and size = betweenness centrality.",
+        "All Communities": "Nodes colored by community.",
+        "Focus on node & neighbors": "Selected node and its direct neighbors only. (Usa il bottone per espandere a 2 salti)",
+        "Selected Node's Community": "Only the selected node's community is shown, with chosen palette."
+    }
+    st.caption(captions[view_mode])
+
+if __name__ == "__main__":
+    main()
