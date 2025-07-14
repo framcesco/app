@@ -196,3 +196,20 @@ def main():
         node_data = G.nodes[selected_node]
         st.json(dict(node_data))
     else:
+        st.info("Seleziona un nodo per vedere gli attributi.")
+
+    with st.expander("Mostra dati tabellari del sottografo attuale"):
+        current_nodes = list(H.nodes)
+        df_sub = df[df[PARENT_COL].isin(current_nodes) | df[CHILD_COL].isin(current_nodes)]
+        st.dataframe(df_sub)
+
+    captions = {
+        "Betweenness Centrality": "Node color and size = betweenness centrality.",
+        "All Communities": "Nodes colored by community.",
+        "Focus on node & neighbors": "Selected node and its direct neighbors only. (Usa il bottone per espandere a 2 salti)",
+        "Selected Node's Community": "Only the selected node's community is shown, with chosen palette."
+    }
+    st.caption(captions[view_mode])
+
+if __name__ == "__main__":
+    main()
