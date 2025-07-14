@@ -4,7 +4,6 @@ import pandas as pd
 from pyvis.network import Network
 import tempfile
 import networkx as nx
-import os
 
 try:
     import community as community_louvain
@@ -111,37 +110,48 @@ def display_network(G: nx.DiGraph, selected: str, mode: str, centrality: dict, p
 def main():
     st.title("Interactive Network Explorer")
 
-    # --- UPLOAD NUOVO FILE E RESET ---
-    st.sidebar.header("Gestione Database")
-    uploaded_file = st.sidebar.file_uploader("Carica nuovo file Excel", type=["xlsx"])
-    reset_db = st.sidebar.button("Reset database (elimina file caricato)")
+    st.markdown("""
+    **Gestione database della rete**
+    - Carica un file Excel della tua rete con colonne: `nome_parent`, `nome_nodo` (almeno queste!).
+    - Premi su 'Reset database' per eliminare il file corrente e ripartire da zero.
+    """)
+
+    # Caricamento o reset database
+    uploaded_file = st.file_uploader("Carica un nuovo file Excel della rete", type=["xlsx"])
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        reset_db = st.button("Reset database", help="Elimina il file corrente e riparti")
 
     if reset_db:
         if DATA_FILE.exists():
             DATA_FILE.unlink()
-            st.success("Database resettato! Ricarica la pagina e carica un nuovo file.")
+            st.success("Database eliminato! Carica un nuovo file per ricominciare.")
             st.stop()
         else:
-            st.warning("Nessun database da resettare.")
+            st.warning("Nessun database da eliminare.")
             st.stop()
 
     if uploaded_file:
-        # Salva il file caricato come nuovo database
         with open(DATA_FILE, "wb") as f:
             f.write(uploaded_file.read())
-        st.success("File caricato con successo! Ricarica la pagina per proseguire con l'analisi.")
-        st.stop()  # Stop per evitare problemi con dati misti nel ciclo della sessione
-
-    if not DATA_FILE.exists():
-        st.info("Carica un file Excel per iniziare.")
+        st.success("File caricato correttamente! Ricarica la pagina per continuare.")
         st.stop()
 
-    # --- LOGICA STANDARD ---
-    df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
+    if not DATA_FILE.exists():
+        st.info("🔼 Carica prima un file Excel per iniziare.")
+        st.stop()
+
+    # --- Applicazione di analisi ---
+    try:
+        df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
+    except Exception as e:
+        st.error(f"Errore nel caricamento del file: {e}")
+        st.stop()
+
     all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
-    selected_node = st.selectbox("Select a node:", all_names)
+    selected_node = st.selectbox("Scegli un nodo", all_names)
     view_mode = st.radio(
-        "Visualization mode:",
+        "Modalità di visualizzazione",
         [
             "Focus on node & neighbors",
             "Betweenness Centrality",
@@ -152,13 +162,13 @@ def main():
 
     palette_name = "Default (bold)"
     if view_mode in ("All Communities", "Selected Node's Community"):
-        palette_name = st.selectbox("Community color palette", list(PALETTES), 0)
+        palette_name = st.selectbox("Palette colori comunità", list(PALETTES), 0)
     palette = get_palette(palette_name)
 
-    hierarchy = st.checkbox("Show as hierarchical layout", value=True)
+    hierarchy = st.checkbox("Mostra layout gerarchico", value=True)
     if hierarchy:
         direction_name = st.selectbox(
-            "Hierarchy direction", ["Top-down", "Bottom-up", "Left-right", "Right-left"], 0
+            "Direzione gerarchica", ["Top-down", "Bottom-up", "Left-right", "Right-left"], 0
         )
         direction_map = {
             "Top-down": "UD",
@@ -186,20 +196,3 @@ def main():
         node_data = G.nodes[selected_node]
         st.json(dict(node_data))
     else:
-        st.info("Seleziona un nodo per vedere gli attributi.")
-
-    with st.expander("Mostra dati tabellari del sottografo attuale"):
-        current_nodes = list(H.nodes)
-        df_sub = df[df[PARENT_COL].isin(current_nodes) | df[CHILD_COL].isin(current_nodes)]
-        st.dataframe(df_sub)
-
-    captions = {
-        "Betweenness Centrality": "Node color and size = betweenness centrality.",
-        "All Communities": "Nodes colored by community.",
-        "Focus on node & neighbors": "Selected node and its direct neighbors only. (Usa il bottone per espandere a 2 salti)",
-        "Selected Node's Community": "Only the selected node's community is shown, with chosen palette."
-    }
-    st.caption(captions[view_mode])
-
-if __name__ == "__main__":
-    main()
