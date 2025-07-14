@@ -4,6 +4,7 @@ import pandas as pd
 from pyvis.network import Network
 import tempfile
 import networkx as nx
+import os
 
 try:
     import community as community_louvain
@@ -41,7 +42,6 @@ def load_data(filepath: Path, parent: str, child: str) -> pd.DataFrame:
 def build_graph(df: pd.DataFrame, parent: str, child: str) -> nx.DiGraph:
     g = nx.DiGraph()
     g.add_edges_from(df[[parent, child]].values)
-    # Salva attributi tabellari
     for _, row in df.iterrows():
         g.nodes[row[child]].update(row.dropna().to_dict())
     return g
@@ -49,13 +49,8 @@ def build_graph(df: pd.DataFrame, parent: str, child: str) -> nx.DiGraph:
 def get_palette(palette_name: str) -> list[str]:
     return PALETTES[palette_name]
 
-def get_node_attrs(
-    node: str, selected: str, mode: str, centrality: dict, partition: dict, palette: list, node_attrs: dict
-) -> dict:
-    # Tooltip multi-riga (testo, NON HTML)
-    title = "ATTRIBUTI NODO:\n" + "\n".join(
-        [f"{k}: {v}" for k, v in node_attrs.get(node, {}).items()]
-    )
+def get_node_attrs(node: str, selected: str, mode: str, centrality: dict, partition: dict, palette: list, node_attrs: dict) -> dict:
+    title = "ATTRIBUTI NODO:\n" + "\n".join([f"{k}: {v}" for k, v in node_attrs.get(node, {}).items()])
     if mode == "Focus on node & neighbors":
         if node == selected:
             return {"color": "orange", "size": 35, "title": title}
@@ -72,13 +67,10 @@ def get_node_attrs(
         return {"color": color, "size": size, "title": title}
     return {"color": "lightgray", "size": 15, "title": title}
 
-def filter_graph(
-    G: nx.DiGraph, selected: str, mode: str, partition: dict, expand_neighbors=False
-) -> nx.DiGraph:
+def filter_graph(G: nx.DiGraph, selected: str, mode: str, partition: dict, expand_neighbors=False) -> nx.DiGraph:
     if mode == "Focus on node & neighbors":
         neighbors = set(G.successors(selected)) | set(G.predecessors(selected))
         if expand_neighbors:
-            # Espandi anche ai vicini dei vicini (2 salti)
             second_neighbors = set()
             for n in neighbors:
                 second_neighbors |= set(G.successors(n)) | set(G.predecessors(n))
@@ -92,9 +84,7 @@ def filter_graph(
         return G.subgraph(nodes).copy()
     return G
 
-def display_network(
-    G: nx.DiGraph, selected: str, mode: str, centrality: dict, partition: dict, palette: list, hierarchy: bool, direction: str, expand_neighbors: bool, node_attrs: dict
-) -> None:
+def display_network(G: nx.DiGraph, selected: str, mode: str, centrality: dict, partition: dict, palette: list, hierarchy: bool, direction: str, expand_neighbors: bool, node_attrs: dict) -> None:
     net = Network(height="600px", width="100%", directed=True)
     for node in G.nodes:
         attrs = get_node_attrs(node, selected, mode, centrality, partition, palette, node_attrs)
@@ -121,6 +111,32 @@ def display_network(
 def main():
     st.title("Interactive Network Explorer")
 
+    # --- UPLOAD NUOVO FILE E RESET ---
+    st.sidebar.header("Gestione Database")
+    uploaded_file = st.sidebar.file_uploader("Carica nuovo file Excel", type=["xlsx"])
+    reset_db = st.sidebar.button("Reset database (elimina file caricato)")
+
+    if reset_db:
+        if DATA_FILE.exists():
+            DATA_FILE.unlink()
+            st.success("Database resettato! Ricarica la pagina e carica un nuovo file.")
+            st.stop()
+        else:
+            st.warning("Nessun database da resettare.")
+            st.stop()
+
+    if uploaded_file:
+        # Salva il file caricato come nuovo database
+        with open(DATA_FILE, "wb") as f:
+            f.write(uploaded_file.read())
+        st.success("File caricato con successo! Ricarica la pagina per proseguire con l'analisi.")
+        st.stop()  # Stop per evitare problemi con dati misti nel ciclo della sessione
+
+    if not DATA_FILE.exists():
+        st.info("Carica un file Excel per iniziare.")
+        st.stop()
+
+    # --- LOGICA STANDARD ---
     df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
     all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
     selected_node = st.selectbox("Select a node:", all_names)
@@ -155,7 +171,6 @@ def main():
         direction = "UD"
 
     expand_neighbors = False
-    # SOLO se sei in modalità "Focus on node & neighbors"
     if view_mode == "Focus on node & neighbors":
         expand_neighbors = st.button("Espandi a vicini dei vicini (2 salti dal nodo selezionato)")
 
@@ -166,7 +181,6 @@ def main():
     H = filter_graph(G, selected_node, view_mode, partition, expand_neighbors)
     display_network(H, selected_node, view_mode, centrality, partition, palette, hierarchy, direction, expand_neighbors, node_attrs)
 
-    # Attributi del nodo selezionato (combo)
     if selected_node in G.nodes:
         st.subheader(f"Attributi nodo: {selected_node}")
         node_data = G.nodes[selected_node]
@@ -174,7 +188,6 @@ def main():
     else:
         st.info("Seleziona un nodo per vedere gli attributi.")
 
-    # Visualizza dati tabellari del sottografo attuale
     with st.expander("Mostra dati tabellari del sottografo attuale"):
         current_nodes = list(H.nodes)
         df_sub = df[df[PARENT_COL].isin(current_nodes) | df[CHILD_COL].isin(current_nodes)]
