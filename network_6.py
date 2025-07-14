@@ -4,6 +4,7 @@ import pandas as pd
 from pyvis.network import Network
 import tempfile
 import networkx as nx
+import matplotlib.pyplot as plt
 
 try:
     import community as community_louvain
@@ -116,7 +117,6 @@ def main():
     - Premi su 'Reset database' per eliminare il file corrente e ripartire da zero.
     """)
 
-    # Caricamento o reset database
     uploaded_file = st.file_uploader("Carica un nuovo file Excel della rete", type=["xlsx"])
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -141,13 +141,49 @@ def main():
         st.info("🔼 Carica prima un file Excel per iniziare.")
         st.stop()
 
-    # --- Applicazione di analisi ---
+    # --- Caricamento rete ---
     try:
         df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
     except Exception as e:
         st.error(f"Errore nel caricamento del file: {e}")
         st.stop()
 
+    G = build_graph(df, PARENT_COL, CHILD_COL)
+    node_attrs = {n: G.nodes[n] for n in G.nodes}
+    centrality = nx.betweenness_centrality(G)
+    partition = community_louvain.best_partition(G.to_undirected())
+
+    # --- Infografica ---
+    num_nodes = G.number_of_nodes()
+    num_edges = G.number_of_edges()
+    num_communities = len(set(partition.values()))
+    degrees = dict(G.degree())
+    max_degree_node = max(degrees, key=degrees.get)
+    max_degree = degrees[max_degree_node]
+    max_centrality_node = max(centrality, key=centrality.get)
+    max_centrality = centrality[max_centrality_node]
+
+    st.markdown("## 📊 Infografica della rete caricata")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Nodi", num_nodes)
+    c2.metric("Collegamenti", num_edges)
+    c3.metric("Comunità", num_communities)
+
+    st.markdown("### 🔝 Nodo con più collegamenti")
+    st.write(f"**{max_degree_node}** ({max_degree} collegamenti)")
+
+    st.markdown("### ⭐ Nodo più centrale (betweenness)")
+    st.write(f"**{max_centrality_node}** (Centralità = {max_centrality:.2f})")
+
+    with st.expander("Distribuzione dei gradi dei nodi"):
+        fig, ax = plt.subplots()
+        ax.hist(list(degrees.values()), bins=15)
+        ax.set_xlabel("Grado (numero collegamenti)")
+        ax.set_ylabel("Numero nodi")
+        st.pyplot(fig)
+
+    # --- Interfaccia standard ---
     all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
     selected_node = st.selectbox("Scegli un nodo", all_names)
     view_mode = st.radio(
@@ -184,10 +220,6 @@ def main():
     if view_mode == "Focus on node & neighbors":
         expand_neighbors = st.button("Espandi a vicini dei vicini (2 salti dal nodo selezionato)")
 
-    G = build_graph(df, PARENT_COL, CHILD_COL)
-    node_attrs = {n: G.nodes[n] for n in G.nodes}
-    centrality = nx.betweenness_centrality(G)
-    partition = community_louvain.best_partition(G.to_undirected())
     H = filter_graph(G, selected_node, view_mode, partition, expand_neighbors)
     display_network(H, selected_node, view_mode, centrality, partition, palette, hierarchy, direction, expand_neighbors, node_attrs)
 
