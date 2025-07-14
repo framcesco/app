@@ -41,33 +41,35 @@ def load_data(filepath: Path, parent: str, child: str) -> pd.DataFrame:
 def build_graph(df: pd.DataFrame, parent: str, child: str) -> nx.DiGraph:
     g = nx.DiGraph()
     g.add_edges_from(df[[parent, child]].values)
-    # Salva attributi tabellari
+    # Aggiungi tutti gli attributi tabellari al nodo 'child'
     for _, row in df.iterrows():
-        g.nodes[row[child]].update(row.to_dict())
+        attrs = row.dropna().to_dict()
+        g.nodes[row[child]].update(attrs)
     return g
 
 def get_palette(palette_name: str) -> list[str]:
     return PALETTES[palette_name]
 
 def get_node_attrs(
-    node: str, selected: str, mode: str, centrality: dict, partition: dict, palette: list
+    node: str, selected: str, mode: str, centrality: dict, partition: dict, palette: list, node_attrs: dict
 ) -> dict:
+    # Tooltip HTML con tutti gli attributi disponibili per questo nodo
+    title = "<br>".join([f"<b>{k}:</b> {v}" for k, v in node_attrs.get(node, {}).items()])
     if mode == "Focus on node & neighbors":
         if node == selected:
-            return {"color": "orange", "size": 35, "title": f"{node} (selected)"}
-        return {"color": "skyblue", "size": 20, "title": f"{node} (neighbor)"}
+            return {"color": "orange", "size": 35, "title": title}
+        return {"color": "skyblue", "size": 20, "title": title}
     if mode == "Betweenness Centrality":
         val = centrality.get(node, 0)
         color = f"rgba(255,100,100,{0.2 + 0.8 * val})"
         size = 15 + val * 40
-        return {"color": color, "size": size, "title": f"{node}<br>Centrality: {val:.3f}"}
+        return {"color": color, "size": size, "title": title}
     if mode in ("All Communities", "Selected Node's Community"):
         comm = partition[node]
         color = palette[comm % len(palette)]
         size = 40 if node == selected and mode == "Selected Node's Community" else 25
-        title = f"{node}<br>Community: {comm}"
         return {"color": color, "size": size, "title": title}
-    return {"color": "lightgray", "size": 15, "title": node}
+    return {"color": "lightgray", "size": 15, "title": title}
 
 def filter_graph(
     G: nx.DiGraph, selected: str, mode: str, partition: dict, expand_neighbors=False
@@ -92,11 +94,11 @@ def filter_graph(
     return G
 
 def display_network(
-    G: nx.DiGraph, selected: str, mode: str, centrality: dict, partition: dict, palette: list, hierarchy: bool, direction: str, expand_neighbors: bool
-) -> str:
-    net = Network(height="600px", width="100%", directed=True, notebook=False)
+    G: nx.DiGraph, selected: str, mode: str, centrality: dict, partition: dict, palette: list, hierarchy: bool, direction: str, expand_neighbors: bool, node_attrs: dict
+) -> None:
+    net = Network(height="600px", width="100%", directed=True)
     for node in G.nodes:
-        attrs = get_node_attrs(node, selected, mode, centrality, partition, palette)
+        attrs = get_node_attrs(node, selected, mode, centrality, partition, palette, node_attrs)
         net.add_node(node, label=node, color=attrs["color"], size=attrs["size"], title=attrs["title"])
     for src, dst in G.edges:
         net.add_edge(src, dst)
@@ -112,12 +114,10 @@ def display_network(
           }}
         }}
         """)
-    # Salva e mostra html
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html") as tmp_file:
         net.save_graph(tmp_file.name)
         html = open(tmp_file.name, "r", encoding="utf-8").read()
         st.components.v1.html(html, height=620, scrolling=True)
-    return net
 
 def main():
     st.title("Interactive Network Explorer")
@@ -134,6 +134,7 @@ def main():
             "Selected Node's Community"
         ]
     )
+
     palette_name = "Default (bold)"
     if view_mode in ("All Communities", "Selected Node's Community"):
         palette_name = st.selectbox("Community color palette", list(PALETTES), 0)
@@ -159,23 +160,25 @@ def main():
         expand_neighbors = st.button("Double-click: show all degree 1 neighbors (simulate double click)")
 
     G = build_graph(df, PARENT_COL, CHILD_COL)
+    # Preleva tutti gli attributi disponibili per ogni nodo
+    node_attrs = {n: G.nodes[n] for n in G.nodes}
     centrality = nx.betweenness_centrality(G)
     partition = community_louvain.best_partition(G.to_undirected())
     H = filter_graph(G, selected_node, view_mode, partition, expand_neighbors)
-    display_network(H, selected_node, view_mode, centrality, partition, palette, hierarchy, direction, expand_neighbors)
+    display_network(H, selected_node, view_mode, centrality, partition, palette, hierarchy, direction, expand_neighbors, node_attrs)
 
-    # Attributi del nodo selezionato
+    # Attributi del nodo selezionato dalla combo
     if selected_node in G.nodes:
         st.subheader(f"Attributi nodo: {selected_node}")
         node_data = G.nodes[selected_node]
-        st.json(node_data)
+        st.json(dict(node_data))
     else:
         st.info("Seleziona un nodo per vedere gli attributi.")
 
     # Visualizza dati tabellari del sottografo
     with st.expander("Mostra dati tabellari del sottografo attuale"):
         current_nodes = list(H.nodes)
-        df_sub = df[df[CHILD_COL].isin(current_nodes) | df[PARENT_COL].isin(current_nodes)]
+        df_sub = df[df[PARENT_COL].isin(current_nodes) | df[CHILD_COL].isin(current_nodes)]
         st.dataframe(df_sub)
 
     captions = {
