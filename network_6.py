@@ -41,6 +41,9 @@ def load_data(filepath: Path, parent: str, child: str) -> pd.DataFrame:
 def build_graph(df: pd.DataFrame, parent: str, child: str) -> nx.DiGraph:
     g = nx.DiGraph()
     g.add_edges_from(df[[parent, child]].values)
+    # Salva attributi tabellari
+    for _, row in df.iterrows():
+        g.nodes[row[child]].update(row.to_dict())
     return g
 
 def get_palette(palette_name: str) -> list[str]:
@@ -67,11 +70,20 @@ def get_node_attrs(
     return {"color": "lightgray", "size": 15, "title": node}
 
 def filter_graph(
-    G: nx.DiGraph, selected: str, mode: str, partition: dict
+    G: nx.DiGraph, selected: str, mode: str, partition: dict, expand_neighbors=False
 ) -> nx.DiGraph:
     if mode == "Focus on node & neighbors":
         neighbors = set(G.successors(selected)) | set(G.predecessors(selected))
-        nodes = {selected} | neighbors
+        if expand_neighbors:
+            # Espandi tutti i nodi degree 1 connessi
+            extra = set()
+            for n in neighbors:
+                deg = G.degree(n)
+                if deg == 1:
+                    extra |= set(G.successors(n)) | set(G.predecessors(n))
+            nodes = {selected} | neighbors | extra
+        else:
+            nodes = {selected} | neighbors
         return G.subgraph(nodes).copy()
     if mode == "Selected Node's Community":
         comm = partition[selected]
@@ -80,9 +92,9 @@ def filter_graph(
     return G
 
 def display_network(
-    G: nx.DiGraph, selected: str, mode: str, centrality: dict, partition: dict, palette: list, hierarchy: bool, direction: str
-) -> None:
-    net = Network(height="600px", width="100%", directed=True)
+    G: nx.DiGraph, selected: str, mode: str, centrality: dict, partition: dict, palette: list, hierarchy: bool, direction: str, expand_neighbors: bool
+) -> str:
+    net = Network(height="600px", width="100%", directed=True, notebook=False)
     for node in G.nodes:
         attrs = get_node_attrs(node, selected, mode, centrality, partition, palette)
         net.add_node(node, label=node, color=attrs["color"], size=attrs["size"], title=attrs["title"])
@@ -100,10 +112,12 @@ def display_network(
           }}
         }}
         """)
+    # Salva e mostra html
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html") as tmp_file:
         net.save_graph(tmp_file.name)
         html = open(tmp_file.name, "r", encoding="utf-8").read()
         st.components.v1.html(html, height=620, scrolling=True)
+    return net
 
 def main():
     st.title("Interactive Network Explorer")
@@ -120,7 +134,6 @@ def main():
             "Selected Node's Community"
         ]
     )
-
     palette_name = "Default (bold)"
     if view_mode in ("All Communities", "Selected Node's Community"):
         palette_name = st.selectbox("Community color palette", list(PALETTES), 0)
@@ -141,11 +154,29 @@ def main():
     else:
         direction = "UD"
 
+    expand_neighbors = False
+    if view_mode == "Focus on node & neighbors":
+        expand_neighbors = st.button("Double-click: show all degree 1 neighbors (simulate double click)")
+
     G = build_graph(df, PARENT_COL, CHILD_COL)
     centrality = nx.betweenness_centrality(G)
     partition = community_louvain.best_partition(G.to_undirected())
-    H = filter_graph(G, selected_node, view_mode, partition)
-    display_network(H, selected_node, view_mode, centrality, partition, palette, hierarchy, direction)
+    H = filter_graph(G, selected_node, view_mode, partition, expand_neighbors)
+    display_network(H, selected_node, view_mode, centrality, partition, palette, hierarchy, direction, expand_neighbors)
+
+    # Attributi del nodo selezionato
+    if selected_node in G.nodes:
+        st.subheader(f"Attributi nodo: {selected_node}")
+        node_data = G.nodes[selected_node]
+        st.json(node_data)
+    else:
+        st.info("Seleziona un nodo per vedere gli attributi.")
+
+    # Visualizza dati tabellari del sottografo
+    with st.expander("Mostra dati tabellari del sottografo attuale"):
+        current_nodes = list(H.nodes)
+        df_sub = df[df[CHILD_COL].isin(current_nodes) | df[PARENT_COL].isin(current_nodes)]
+        st.dataframe(df_sub)
 
     captions = {
         "Betweenness Centrality": "Node color and size = betweenness centrality.",
