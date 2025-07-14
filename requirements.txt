@@ -4,3 +4,6 @@ networkx
 python-louvain
 pandas
 openpyxl
+matplotlib
+numpy
+scipy
