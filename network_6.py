@@ -153,7 +153,6 @@ def main():
     centrality = nx.betweenness_centrality(G)
     partition = community_louvain.best_partition(G.to_undirected())
 
-    # --- Infografica ---
     num_nodes = G.number_of_nodes()
     num_edges = G.number_of_edges()
     num_communities = len(set(partition.values()))
@@ -163,25 +162,65 @@ def main():
     max_centrality_node = max(centrality, key=centrality.get)
     max_centrality = centrality[max_centrality_node]
 
-    st.markdown("## 📊 Infografica della rete caricata")
+    # --- Layout: Infografica + Teoria grafi ---
+    col_infog, col_side = st.columns([2, 1])
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Nodi", num_nodes)
-    c2.metric("Collegamenti", num_edges)
-    c3.metric("Comunità", num_communities)
+    with col_infog:
+        st.markdown("## 📊 Infografica della rete caricata")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Nodi", num_nodes)
+        c2.metric("Collegamenti", num_edges)
+        c3.metric("Comunità", num_communities)
+        st.markdown("### 🔝 Nodo con più collegamenti")
+        st.write(f"**{max_degree_node}** ({max_degree} collegamenti)")
+        st.markdown("### ⭐ Nodo più centrale (betweenness)")
+        st.write(f"**{max_centrality_node}** (Centralità = {max_centrality:.2f})")
+        with st.expander("Distribuzione dei gradi dei nodi"):
+            fig, ax = plt.subplots()
+            ax.hist(list(degrees.values()), bins=15)
+            ax.set_xlabel("Grado (numero collegamenti)")
+            ax.set_ylabel("Numero nodi")
+            st.pyplot(fig)
 
-    st.markdown("### 🔝 Nodo con più collegamenti")
-    st.write(f"**{max_degree_node}** ({max_degree} collegamenti)")
+    with col_side:
+        st.markdown("## ℹ️ Teoria dei grafi")
+        # Densità
+        density = nx.density(G)
+        st.metric("Densità", f"{density:.3f}")
 
-    st.markdown("### ⭐ Nodo più centrale (betweenness)")
-    st.write(f"**{max_centrality_node}** (Centralità = {max_centrality:.2f})")
+        # Diametro (solo se connesso)
+        try:
+            diameter = nx.diameter(G)
+            st.metric("Diametro", diameter)
+        except:
+            st.metric("Diametro", "Non calcolabile")
 
-    with st.expander("Distribuzione dei gradi dei nodi"):
-        fig, ax = plt.subplots()
-        ax.hist(list(degrees.values()), bins=15)
-        ax.set_xlabel("Grado (numero collegamenti)")
-        ax.set_ylabel("Numero nodi")
-        st.pyplot(fig)
+        # Lunghezza media cammini
+        try:
+            avg_path = nx.average_shortest_path_length(G)
+            st.metric("Lunghezza media cammino", f"{avg_path:.2f}")
+        except:
+            st.metric("Lunghezza media cammino", "Non calcolabile")
+
+        # Grado medio
+        avg_degree = sum(degrees.values())/num_nodes if num_nodes > 0 else 0
+        st.metric("Grado medio", f"{avg_degree:.2f}")
+
+        # Clustering coefficient medio (grafo non orientato)
+        try:
+            clustering = nx.average_clustering(G.to_undirected())
+            st.metric("Clustering coeff. medio", f"{clustering:.2f}")
+        except:
+            st.metric("Clustering coeff. medio", "-")
+
+        # Percentuale nodi isolati
+        num_isolated = len(list(nx.isolates(G)))
+        perc_isolated = (num_isolated/num_nodes)*100 if num_nodes > 0 else 0
+        st.metric("Nodi isolati", f"{num_isolated} ({perc_isolated:.1f}%)")
+
+        # Nodi foglia (out_degree = 0)
+        num_leaf = sum(1 for n, d in G.out_degree() if d == 0)
+        st.metric("Nodi foglia (out)", num_leaf)
 
     # --- Interfaccia standard ---
     all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
