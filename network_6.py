@@ -53,11 +53,10 @@ def get_palette(palette_name: str) -> list[str]:
 def get_node_attrs(
     node: str, selected: str, mode: str, centrality: dict, partition: dict, palette: list, node_attrs: dict
 ) -> dict:
-    # Tooltip HTML con tutti gli attributi disponibili per questo nodo
-    # title = "<br>".join([f"<b>{k}:</b> {v}" for k, v in node_attrs.get(node, {}).items()])
-    title = "<b>ATTRIBUTI NODO:</b><br/>" + "<br/>".join(
-    [f"<b>{k}:</b> {v}" for k, v in node_attrs.get(node, {}).items()]
-)
+    # Tooltip in puro testo, ogni attributo va a capo
+    title = "ATTRIBUTI NODO:\n" + "\n".join(
+        [f"{k}: {v}" for k, v in node_attrs.get(node, {}).items()]
+    )
     if mode == "Focus on node & neighbors":
         if node == selected:
             return {"color": "orange", "size": 35, "title": title}
@@ -73,7 +72,6 @@ def get_node_attrs(
         size = 40 if node == selected and mode == "Selected Node's Community" else 25
         return {"color": color, "size": size, "title": title}
     return {"color": "lightgray", "size": 15, "title": title}
-
 def filter_graph(
     G: nx.DiGraph, selected: str, mode: str, partition: dict, expand_neighbors=False
 ) -> nx.DiGraph:
