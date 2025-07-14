@@ -54,7 +54,10 @@ def get_node_attrs(
     node: str, selected: str, mode: str, centrality: dict, partition: dict, palette: list, node_attrs: dict
 ) -> dict:
     # Tooltip HTML con tutti gli attributi disponibili per questo nodo
-    title = "<br>".join([f"<b>{k}:</b> {v}" for k, v in node_attrs.get(node, {}).items()])
+    # title = "<br>".join([f"<b>{k}:</b> {v}" for k, v in node_attrs.get(node, {}).items()])
+    title = "<b>ATTRIBUTI NODO:</b><br/>" + "<br/>".join(
+    [f"<b>{k}:</b> {v}" for k, v in node_attrs.get(node, {}).items()]
+)
     if mode == "Focus on node & neighbors":
         if node == selected:
             return {"color": "orange", "size": 35, "title": title}
