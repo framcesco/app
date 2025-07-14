@@ -72,4 +72,80 @@ def get_node_attrs(
         return {"color": color, "size": size, "title": title}
     return {"color": "lightgray", "size": 15, "title": title}
 
-def fi
+def filter_graph(
+    G: nx.DiGraph, selected: str, mode: str, partition: dict, expand_neighbors=False
+) -> nx.DiGraph:
+    if mode == "Focus on node & neighbors":
+        neighbors = set(G.successors(selected)) | set(G.predecessors(selected))
+        if expand_neighbors:
+            # Espandi anche ai vicini dei vicini (2 salti)
+            second_neighbors = set()
+            for n in neighbors:
+                second_neighbors |= set(G.successors(n)) | set(G.predecessors(n))
+            nodes = {selected} | neighbors | second_neighbors
+        else:
+            nodes = {selected} | neighbors
+        return G.subgraph(nodes).copy()
+    if mode == "Selected Node's Community":
+        comm = partition[selected]
+        nodes = [n for n in G.nodes if partition[n] == comm]
+        return G.subgraph(nodes).copy()
+    return G
+
+def display_network(
+    G: nx.DiGraph, selected: str, mode: str, centrality: dict, partition: dict, palette: list, hierarchy: bool, direction: str, expand_neighbors: bool, node_attrs: dict
+) -> None:
+    net = Network(height="600px", width="100%", directed=True)
+    for node in G.nodes:
+        attrs = get_node_attrs(node, selected, mode, centrality, partition, palette, node_attrs)
+        net.add_node(node, label=node, color=attrs["color"], size=attrs["size"], title=attrs["title"])
+    for src, dst in G.edges:
+        net.add_edge(src, dst)
+    if hierarchy:
+        net.set_options(f"""
+        var options = {{
+          "layout": {{
+            "hierarchical": {{
+              "enabled": true,
+              "direction": "{direction}",
+              "sortMethod": "directed"
+            }}
+          }}
+        }}
+        """)
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html") as tmp_file:
+        net.save_graph(tmp_file.name)
+        html = open(tmp_file.name, "r", encoding="utf-8").read()
+        st.components.v1.html(html, height=620, scrolling=True)
+
+def main():
+    st.title("Interactive Network Explorer")
+
+    df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
+    all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
+    selected_node = st.selectbox("Select a node:", all_names)
+    view_mode = st.radio(
+        "Visualization mode:",
+        [
+            "Focus on node & neighbors",
+            "Betweenness Centrality",
+            "All Communities",
+            "Selected Node's Community"
+        ]
+    )
+
+    palette_name = "Default (bold)"
+    if view_mode in ("All Communities", "Selected Node's Community"):
+        palette_name = st.selectbox("Community color palette", list(PALETTES), 0)
+    palette = get_palette(palette_name)
+
+    hierarchy = st.checkbox("Show as hierarchical layout", value=True)
+    if hierarchy:
+        direction_name = st.selectbox(
+            "Hierarchy direction", ["Top-down", "Bottom-up", "Left-right", "Right-left"], 0
+        )
+        direction_map = {
+            "Top-down": "UD",
+            "Bottom-up": "DU",
+            "Left-right": "LR",
+            "Right-left": "R
