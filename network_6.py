@@ -118,7 +118,7 @@ def display_network(
         st.components.v1.html(html, height=620, scrolling=True)
 
 def main():
-    st.title("Interactive Network Explorer")
+    st.title("XXXXXX")
 
     # 1. File upload e caricamento in memoria
     st.sidebar.header("Carica un nuovo file Excel")
