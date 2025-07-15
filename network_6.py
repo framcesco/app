@@ -4,12 +4,8 @@ import pandas as pd
 from pyvis.network import Network
 import tempfile
 import networkx as nx
+import community as community_louvain
 
-try:
-    import community as community_louvain
-except ImportError:
-    st.error("Install python-louvain: pip install python-louvain")
-    st.stop()
 
 DATA_FILE = Path("network_data.xlsx")
 PARENT_COL = "nome_parent"
@@ -118,9 +114,8 @@ def display_network(
         st.components.v1.html(html, height=620, scrolling=True)
 
 def main():
-    st.title("XXXXXX")
+    st.title("Interactive Network Explorer")
 
-    # 1. File upload e caricamento in memoria
     st.sidebar.header("Carica un nuovo file Excel")
     uploaded_file = st.sidebar.file_uploader(
         "Sostituisci il database (file Excel .xlsx)",
@@ -135,16 +130,30 @@ def main():
 
     df = st.session_state.df
 
-    # 2. Interfaccia AGGIUNTA/MODIFICA NODI E RELAZIONI
+    all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
+    selected_node = st.selectbox("Select a node:", all_names)
+    # Prendi attributi nodo selezionato (se esiste)
+    selected_attrs = {}
+    if selected_node in df[CHILD_COL].values:
+        selected_row = df[df[CHILD_COL] == selected_node].iloc[-1]
+        selected_attrs = selected_row.dropna().to_dict()
+    elif selected_node in df[PARENT_COL].values:
+        selected_row = df[df[PARENT_COL] == selected_node].iloc[-1]
+        selected_attrs = selected_row.dropna().to_dict()
+
+    # ------------------- AGGIUNGI/MODIFICA: autocompilato -------------------
     with st.sidebar.expander("Aggiungi o modifica nodi/relazioni"):
-        st.write("Aggiungi un nuovo nodo e/o una relazione.")
-        nome_parent = st.text_input("Nodo sorgente (parent):", "")
-        nome_nodo = st.text_input("Nodo destinazione (child):", "")
-        # Altri attributi personalizzati:
+        st.write("Aggiungi un nuovo nodo e/o una relazione.\nSe hai selezionato un nodo, i suoi attributi vengono proposti di default.")
+        nome_parent = st.text_input(
+            "Nodo sorgente (parent):", value=selected_attrs.get(PARENT_COL, "")
+        )
+        nome_nodo = st.text_input(
+            "Nodo destinazione (child):", value=selected_attrs.get(CHILD_COL, "")
+        )
         col_extra = [c for c in df.columns if c not in [PARENT_COL, CHILD_COL]]
         extra_data = {}
         for c in col_extra:
-            extra_data[c] = st.text_input(f"{c}:", "")
+            extra_data[c] = st.text_input(f"{c}:", value=selected_attrs.get(c, ""))
         add_btn = st.button("Aggiungi nodo/relazione")
 
         if add_btn and nome_parent and nome_nodo:
@@ -153,9 +162,6 @@ def main():
             st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
             st.success(f"Aggiunta relazione: {nome_parent} → {nome_nodo}")
 
-    # 3. Selezioni e visualizzazione grafo
-    all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
-    selected_node = st.selectbox("Select a node:", all_names)
     view_mode = st.radio(
         "Visualization mode:",
         [
