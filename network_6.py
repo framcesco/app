@@ -41,7 +41,6 @@ def load_data(filepath: Path, parent: str, child: str) -> pd.DataFrame:
 def build_graph(df: pd.DataFrame, parent: str, child: str) -> nx.DiGraph:
     g = nx.DiGraph()
     g.add_edges_from(df[[parent, child]].values)
-    # Aggiungi tutti gli attributi tabellari al nodo 'child'
     for _, row in df.iterrows():
         attrs = row.dropna().to_dict()
         g.nodes[row[child]].update(attrs)
@@ -53,8 +52,9 @@ def get_palette(palette_name: str) -> list[str]:
 def get_node_attrs(
     node: str, selected: str, mode: str, centrality: dict, partition: dict, palette: list, node_attrs: dict
 ) -> dict:
-    # Tooltip HTML con tutti gli attributi disponibili per questo nodo
-    title = "<br>".join([f"<b>{k}:</b> {v}" for k, v in node_attrs.get(node, {}).items()])
+    title = "ATTRIBUTI NODO:\n" + "\n".join(
+        [f"{k}: {v}" for k, v in node_attrs.get(node, {}).items()]
+    )
     if mode == "Focus on node & neighbors":
         if node == selected:
             return {"color": "orange", "size": 35, "title": title}
@@ -77,13 +77,10 @@ def filter_graph(
     if mode == "Focus on node & neighbors":
         neighbors = set(G.successors(selected)) | set(G.predecessors(selected))
         if expand_neighbors:
-            # Espandi tutti i nodi degree 1 connessi
-            extra = set()
+            second_neighbors = set()
             for n in neighbors:
-                deg = G.degree(n)
-                if deg == 1:
-                    extra |= set(G.successors(n)) | set(G.predecessors(n))
-            nodes = {selected} | neighbors | extra
+                second_neighbors |= set(G.successors(n)) | set(G.predecessors(n))
+            nodes = {selected} | neighbors | second_neighbors
         else:
             nodes = {selected} | neighbors
         return G.subgraph(nodes).copy()
@@ -157,17 +154,67 @@ def main():
 
     expand_neighbors = False
     if view_mode == "Focus on node & neighbors":
-        expand_neighbors = st.button("Double-click: show all degree 1 neighbors (simulate double click)")
+        expand_neighbors = st.button("Espandi a vicini dei vicini (2 salti dal nodo selezionato)")
 
     G = build_graph(df, PARENT_COL, CHILD_COL)
-    # Preleva tutti gli attributi disponibili per ogni nodo
     node_attrs = {n: G.nodes[n] for n in G.nodes}
     centrality = nx.betweenness_centrality(G)
     partition = community_louvain.best_partition(G.to_undirected())
     H = filter_graph(G, selected_node, view_mode, partition, expand_neighbors)
-    display_network(H, selected_node, view_mode, centrality, partition, palette, hierarchy, direction, expand_neighbors, node_attrs)
 
-    # Attributi del nodo selezionato dalla combo
+    # ------ Colonne grafo e cruscotto ------
+    col1, col2 = st.columns([3, 2])
+
+    with col1:
+        display_network(
+            H, selected_node, view_mode, centrality, partition, palette,
+            hierarchy, direction, expand_neighbors, node_attrs
+        )
+
+    with col2:
+        st.subheader("Cruscotto grafo generale")
+        st.markdown(f"""
+        - **Nodi totali:** {G.number_of_nodes()}
+        - **Archi totali:** {G.number_of_edges()}
+        - **Densità:** {nx.density(G):.3f}
+        - **Nodi isolati:** {len(list(nx.isolates(G)))}
+        - **Componenti connesse:** {nx.number_weakly_connected_components(G)}
+        """)
+        try:
+            st.markdown(f"- **Diametro (componente principale):** {nx.diameter(G.to_undirected())}")
+        except Exception:
+            st.markdown("- **Diametro (componente principale):** n/d")
+        st.markdown(f"- **Numero community:** {len(set(partition.values()))}")
+
+        # Statistiche community selezionata o distribuzione community
+        if view_mode == "Selected Node's Community" and selected_node in partition:
+            comm_id = partition[selected_node]
+            comm_nodes = [n for n in G.nodes if partition[n] == comm_id]
+            comm_subgraph = G.subgraph(comm_nodes)
+            st.markdown("---")
+            st.subheader(f"Dettagli Community {comm_id}")
+            st.markdown(f"""
+            - **Nodi nella community:** {len(comm_nodes)}
+            - **Archi nella community:** {comm_subgraph.number_of_edges()}
+            - **Nodi isolati:** {len(list(nx.isolates(comm_subgraph)))}
+            """)
+            sub_centrality = nx.betweenness_centrality(comm_subgraph)
+            if sub_centrality:
+                hub = max(sub_centrality, key=sub_centrality.get)
+                st.markdown(f"- **Nodo più centrale:** {hub}")
+        elif view_mode == "All Communities":
+            st.markdown("---")
+            st.subheader("Distribuzione nodi per community")
+            import matplotlib.pyplot as plt
+            comm_labels = [partition[n] for n in G.nodes]
+            fig, ax = plt.subplots(figsize=(4,2))
+            pd.Series(comm_labels).value_counts().sort_index().plot(kind='bar', ax=ax)
+            ax.set_xlabel("Community")
+            ax.set_ylabel("Numero nodi")
+            st.pyplot(fig)
+    # ---------------------------------------
+
+    # Attributi nodo selezionato
     if selected_node in G.nodes:
         st.subheader(f"Attributi nodo: {selected_node}")
         node_data = G.nodes[selected_node]
@@ -175,7 +222,7 @@ def main():
     else:
         st.info("Seleziona un nodo per vedere gli attributi.")
 
-    # Visualizza dati tabellari del sottografo
+    # Tabella filtrata
     with st.expander("Mostra dati tabellari del sottografo attuale"):
         current_nodes = list(H.nodes)
         df_sub = df[df[PARENT_COL].isin(current_nodes) | df[CHILD_COL].isin(current_nodes)]
@@ -184,8 +231,8 @@ def main():
     captions = {
         "Betweenness Centrality": "Node color and size = betweenness centrality.",
         "All Communities": "Nodes colored by community.",
-        "Focus on node & neighbors": "Selected node and its direct neighbors only.",
-        "Selected Node's Community": "Only the selected node's community is shown, with chosen palette."
+        "Focus on node & neighbors": "Selected node and its direct neighbors only. (Usa il bottone per espandere a 2 salti)",
+        "Selected Node's Community": "Solo la community del nodo selezionato viene mostrata e analizzata."
     }
     st.caption(captions[view_mode])
 
