@@ -54,4 +54,239 @@ def get_node_attrs(
     node: str, selected: str, mode: str, centrality: dict, partition: dict, palette: list, node_attrs: dict
 ) -> dict:
     title = "ATTRIBUTI NODO:\n" + "\n".join(
-        [f"{k}: {v}" for k, v]()
+        [f"{k}: {v}" for k, v in node_attrs.get(node, {}).items()]
+    )
+    if mode == "Focus on node & neighbors":
+        if node == selected:
+            return {"color": "orange", "size": 35, "title": title}
+        return {"color": "skyblue", "size": 20, "title": title}
+    if mode == "Betweenness Centrality":
+        val = centrality.get(node, 0)
+        color = f"rgba(255,100,100,{0.2 + 0.8 * val})"
+        size = 15 + val * 40
+        return {"color": color, "size": size, "title": title}
+    if mode in ("All Communities", "Selected Node's Community"):
+        comm = partition[node]
+        color = palette[comm % len(palette)]
+        size = 40 if node == selected and mode == "Selected Node's Community" else 25
+        return {"color": color, "size": size, "title": title}
+    return {"color": "lightgray", "size": 15, "title": title}
+
+def filter_graph(
+    G: nx.DiGraph, selected: str, mode: str, partition: dict, expand_neighbors=False
+) -> nx.DiGraph:
+    if mode == "Focus on node & neighbors":
+        neighbors = set(G.successors(selected)) | set(G.predecessors(selected))
+        if expand_neighbors:
+            second_neighbors = set()
+            for n in neighbors:
+                second_neighbors |= set(G.successors(n)) | set(G.predecessors(n))
+            nodes = {selected} | neighbors | second_neighbors
+        else:
+            nodes = {selected} | neighbors
+        return G.subgraph(nodes).copy()
+    if mode == "Selected Node's Community":
+        comm = partition[selected]
+        nodes = [n for n in G.nodes if partition[n] == comm]
+        return G.subgraph(nodes).copy()
+    return G
+
+def display_network(
+    G: nx.DiGraph, selected: str, mode: str, centrality: dict, partition: dict, palette: list, hierarchy: bool, direction: str, expand_neighbors: bool, node_attrs: dict
+) -> None:
+    net = Network(height="600px", width="100%", directed=True)
+    for node in G.nodes:
+        attrs = get_node_attrs(node, selected, mode, centrality, partition, palette, node_attrs)
+        net.add_node(node, label=node, color=attrs["color"], size=attrs["size"], title=attrs["title"])
+    for src, dst in G.edges:
+        net.add_edge(src, dst)
+    if hierarchy:
+        net.set_options(f"""
+        var options = {{
+          "layout": {{
+            "hierarchical": {{
+              "enabled": true,
+              "direction": "{direction}",
+              "sortMethod": "directed"
+            }}
+          }}
+        }}
+        """)
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html") as tmp_file:
+        net.save_graph(tmp_file.name)
+        html = open(tmp_file.name, "r", encoding="utf-8").read()
+        st.components.v1.html(html, height=620, scrolling=True)
+
+def main():
+    st.title("Interactive Network Explorer")
+
+    st.sidebar.header("Carica un nuovo file Excel")
+    uploaded_file = st.sidebar.file_uploader(
+        "Sostituisci il database (file Excel .xlsx)",
+        type=["xlsx"],
+        help="Carica un file con almeno le colonne 'nome_parent' e 'nome_nodo'."
+    )
+
+    if "df" not in st.session_state:
+        st.session_state.df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
+    if uploaded_file:
+        st.session_state.df = load_data(uploaded_file, PARENT_COL, CHILD_COL)
+
+    df = st.session_state.df
+
+    # --- AGGIUNGI/RIMUOVI RELAZIONE ---
+    with st.sidebar.expander("Gestione relazioni (archi)", expanded=True):
+        all_nodes = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
+        # --- Aggiungi relazione
+        padre_add = st.selectbox("Nodo sorgente (parent) - AGGIUNGI:", all_nodes, key="autocomplete_parent_add", index=0)
+        figlio_add = st.selectbox("Nodo destinazione (child) - AGGIUNGI:", all_nodes, key="autocomplete_child_add", index=0)
+        add_rel = st.button("Aggiungi relazione")
+        if add_rel:
+            new_row = {PARENT_COL: padre_add, CHILD_COL: figlio_add}
+            st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
+            st.success(f"Aggiunta relazione: {padre_add} → {figlio_add}")
+
+        st.markdown("---")
+        # --- Rimuovi relazione
+        current_edges = df[[PARENT_COL, CHILD_COL]].drop_duplicates().values.tolist()
+        if current_edges:
+            padre_del = st.selectbox(
+                "Nodo sorgente (parent) - RIMUOVI:",
+                sorted(set(x[0] for x in current_edges)),
+                key="autocomplete_parent_del"
+            )
+            possibili_figli = sorted(set(x[1] for x in current_edges if x[0] == padre_del))
+            figlio_del = st.selectbox(
+                "Nodo destinazione (child) - RIMUOVI:",
+                possibili_figli,
+                key="autocomplete_child_del"
+            )
+            if st.button("Rimuovi relazione"):
+                idxs = df.index[(df[PARENT_COL] == padre_del) & (df[CHILD_COL] == figlio_del)].tolist()
+                if idxs:
+                    st.session_state.df = df.drop(idxs).reset_index(drop=True)
+                    st.success(f"Relazione {padre_del} → {figlio_del} rimossa!")
+                else:
+                    st.warning("Relazione non trovata.")
+        else:
+            st.info("Nessuna relazione presente da rimuovere.")
+
+    all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
+    selected_node = st.selectbox("Select a node:", all_names)
+    view_mode = st.radio(
+        "Visualization mode:",
+        [
+            "Focus on node & neighbors",
+            "Betweenness Centrality",
+            "All Communities",
+            "Selected Node's Community"
+        ]
+    )
+
+    palette_name = "Default (bold)"
+    if view_mode in ("All Communities", "Selected Node's Community"):
+        palette_name = st.selectbox("Community color palette", list(PALETTES), 0)
+    palette = get_palette(palette_name)
+
+    hierarchy = st.checkbox("Show as hierarchical layout", value=True)
+    if hierarchy:
+        direction_name = st.selectbox(
+            "Hierarchy direction", ["Top-down", "Bottom-up", "Left-right", "Right-left"], 0
+        )
+        direction_map = {
+            "Top-down": "UD",
+            "Bottom-up": "DU",
+            "Left-right": "LR",
+            "Right-left": "RL"
+        }
+        direction = direction_map[direction_name]
+    else:
+        direction = "UD"
+
+    expand_neighbors = False
+    if view_mode == "Focus on node & neighbors":
+        expand_neighbors = st.button("Espandi a vicini dei vicini (2 salti dal nodo selezionato)")
+
+    G = build_graph(df, PARENT_COL, CHILD_COL)
+    node_attrs = {n: G.nodes[n] for n in G.nodes}
+    centrality = nx.betweenness_centrality(G)
+    partition = community_louvain.best_partition(G.to_undirected())
+    H = filter_graph(G, selected_node, view_mode, partition, expand_neighbors)
+
+    col1, col2 = st.columns([3, 2])
+
+    with col1:
+        display_network(
+            H, selected_node, view_mode, centrality, partition, palette,
+            hierarchy, direction, expand_neighbors, node_attrs
+        )
+
+    with col2:
+        st.subheader("Cruscotto grafo generale")
+        st.markdown(f"""
+        - **Nodi totali:** {G.number_of_nodes()}
+        - **Archi totali:** {G.number_of_edges()}
+        - **Densità:** {nx.density(G):.3f}
+        - **Nodi isolati:** {len(list(nx.isolates(G)))}
+        - **Componenti connesse:** {nx.number_weakly_connected_components(G)}
+        """)
+        try:
+            st.markdown(f"- **Diametro (componente principale):** {nx.diameter(G.to_undirected())}")
+        except Exception:
+            st.markdown("- **Diametro (componente principale):** n/d")
+        st.markdown(f"- **Numero community:** {len(set(partition.values()))}")
+
+        if view_mode == "Selected Node's Community" and selected_node in partition:
+            comm_id = partition[selected_node]
+            comm_nodes = [n for n in G.nodes if partition[n] == comm_id]
+            comm_subgraph = G.subgraph(comm_nodes)
+            st.markdown("---")
+            st.subheader(f"Dettagli Community {comm_id}")
+            st.markdown(f"""
+            - **Nodi nella community:** {len(comm_nodes)}
+            - **Archi nella community:** {comm_subgraph.number_of_edges()}
+            - **Nodi isolati:** {len(list(nx.isolates(comm_subgraph)))}
+            """)
+            sub_centrality = nx.betweenness_centrality(comm_subgraph)
+            if sub_centrality:
+                hub = max(sub_centrality, key=sub_centrality.get)
+                st.markdown(f"- **Nodo più centrale:** {hub}")
+        elif view_mode == "All Communities":
+            st.markdown("---")
+            st.subheader("Distribuzione nodi per community")
+            import matplotlib.pyplot as plt
+            comm_labels = [partition[n] for n in G.nodes]
+            fig, ax = plt.subplots(figsize=(4,2))
+            pd.Series(comm_labels).value_counts().sort_index().plot(kind='bar', ax=ax)
+            ax.set_xlabel("Community")
+            ax.set_ylabel("Numero nodi")
+            st.pyplot(fig)
+
+    if selected_node in G.nodes:
+        st.subheader(f"Attributi nodo: {selected_node}")
+        node_data = G.nodes[selected_node]
+        st.json(dict(node_data))
+    else:
+        st.info("Seleziona un nodo per vedere gli attributi.")
+
+    with st.expander("Mostra dati tabellari del sottografo attuale"):
+        current_nodes = list(H.nodes)
+        df_sub = df[df[PARENT_COL].isin(current_nodes) | df[CHILD_COL].isin(current_nodes)]
+        st.dataframe(df_sub)
+
+    # Download del file attuale aggiornato
+    with st.sidebar.expander("Scarica il database attuale (Excel)"):
+        towrite = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        df.to_excel(towrite.name, index=False)
+        st.download_button("Scarica file Excel aggiornato", open(towrite.name, "rb"), file_name="network_data_edit.xlsx")
+
+    captions = {
+        "Betweenness Centrality": "Node color and size = betweenness centrality.",
+        "All Communities": "Nodes colored by community.",
+        "Focus on node & neighbors": "Selected node and its direct neighbors only. (Usa il bottone per espandere a 2 salti)",
+        "Selected Node's Community": "Solo la community del nodo selezionato viene mostrata e analizzata."
+    }
+    st.caption(captions[view_mode])
+
+if __name__ == "__main__":
+    main()
