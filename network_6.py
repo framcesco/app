@@ -134,16 +134,42 @@ def main():
 
     df = st.session_state.df
 
-    # --- Aggiungi solo relazioni, autocomplete su nodi esistenti
-    with st.sidebar.expander("Aggiungi relazione (arco)", expanded=True):
+    # --- AGGIUNGI/RIMUOVI RELAZIONE ---
+    with st.sidebar.expander("Gestione relazioni (archi)", expanded=True):
         all_nodes = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
-        padre = st.selectbox("Nodo sorgente (parent):", all_nodes, key="autocomplete_parent", index=0)
-        figlio = st.selectbox("Nodo destinazione (child):", all_nodes, key="autocomplete_child", index=0)
+        # --- Aggiungi relazione
+        padre_add = st.selectbox("Nodo sorgente (parent) - AGGIUNGI:", all_nodes, key="autocomplete_parent_add", index=0)
+        figlio_add = st.selectbox("Nodo destinazione (child) - AGGIUNGI:", all_nodes, key="autocomplete_child_add", index=0)
         add_rel = st.button("Aggiungi relazione")
         if add_rel:
-            new_row = {PARENT_COL: padre, CHILD_COL: figlio}
+            new_row = {PARENT_COL: padre_add, CHILD_COL: figlio_add}
             st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
-            st.success(f"Aggiunta relazione: {padre} → {figlio}")
+            st.success(f"Aggiunta relazione: {padre_add} → {figlio_add}")
+
+        st.markdown("---")
+        # --- Rimuovi relazione
+        current_edges = df[[PARENT_COL, CHILD_COL]].drop_duplicates().values.tolist()
+        if current_edges:
+            padre_del = st.selectbox(
+                "Nodo sorgente (parent) - RIMUOVI:",
+                sorted(set(x[0] for x in current_edges)),
+                key="autocomplete_parent_del"
+            )
+            possibili_figli = sorted(set(x[1] for x in current_edges if x[0] == padre_del))
+            figlio_del = st.selectbox(
+                "Nodo destinazione (child) - RIMUOVI:",
+                possibili_figli,
+                key="autocomplete_child_del"
+            )
+            if st.button("Rimuovi relazione"):
+                idxs = df.index[(df[PARENT_COL] == padre_del) & (df[CHILD_COL] == figlio_del)].tolist()
+                if idxs:
+                    st.session_state.df = df.drop(idxs).reset_index(drop=True)
+                    st.success(f"Relazione {padre_del} → {figlio_del} rimossa!")
+                else:
+                    st.warning("Relazione non trovata.")
+        else:
+            st.info("Nessuna relazione presente da rimuovere.")
 
     all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
     selected_node = st.selectbox("Select a node:", all_names)
