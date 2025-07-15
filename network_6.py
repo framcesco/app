@@ -128,7 +128,10 @@ def main():
     )
 
     if "df" not in st.session_state:
-        st.session_state.df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
+        if DATA_FILE.exists():
+            st.session_state.df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
+        else:
+            st.session_state.df = pd.DataFrame(columns=[PARENT_COL, CHILD_COL])
     if uploaded_file:
         st.session_state.df = load_data(uploaded_file, PARENT_COL, CHILD_COL)
 
@@ -144,7 +147,7 @@ def main():
         if add_rel:
             new_row = {PARENT_COL: padre_add, CHILD_COL: figlio_add}
             st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
-            st.success(f"Aggiunta relazione: {padre_add} → {figlio_add}")
+            st.rerun()  # <<<<<<<<<<<<<<<<<<<<<<<<<<<
 
         st.markdown("---")
         # --- Rimuovi relazione
@@ -165,13 +168,16 @@ def main():
                 idxs = df.index[(df[PARENT_COL] == padre_del) & (df[CHILD_COL] == figlio_del)].tolist()
                 if idxs:
                     st.session_state.df = df.drop(idxs).reset_index(drop=True)
-                    st.success(f"Relazione {padre_del} → {figlio_del} rimossa!")
+                    st.rerun()  # <<<<<<<<<<<<<<<<<<<<<<<<<<<
                 else:
                     st.warning("Relazione non trovata.")
         else:
             st.info("Nessuna relazione presente da rimuovere.")
 
     all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
+    if not all_names:
+        st.warning("Nessun nodo presente. Carica un file Excel o aggiungi una relazione.")
+        st.stop()
     selected_node = st.selectbox("Select a node:", all_names)
     view_mode = st.radio(
         "Visualization mode:",
