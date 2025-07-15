@@ -31,6 +31,7 @@ PALETTES = {
     ]
 }
 
+@st.cache_data(show_spinner=False)
 def load_data(filepath: Path, parent: str, child: str) -> pd.DataFrame:
     df = pd.read_excel(filepath)
     df = df.dropna(subset=[parent, child])
@@ -119,7 +120,40 @@ def display_network(
 def main():
     st.title("Interactive Network Explorer")
 
-    df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
+    # 1. File upload e caricamento in memoria
+    st.sidebar.header("Carica un nuovo file Excel")
+    uploaded_file = st.sidebar.file_uploader(
+        "Sostituisci il database (file Excel .xlsx)",
+        type=["xlsx"],
+        help="Carica un file con almeno le colonne 'nome_parent' e 'nome_nodo'."
+    )
+
+    if "df" not in st.session_state:
+        st.session_state.df = load_data(DATA_FILE, PARENT_COL, CHILD_COL)
+    if uploaded_file:
+        st.session_state.df = load_data(uploaded_file, DATA_FILE, PARENT_COL, CHILD_COL)
+
+    df = st.session_state.df
+
+    # 2. Interfaccia AGGIUNTA/MODIFICA NODI E RELAZIONI
+    with st.sidebar.expander("Aggiungi o modifica nodi/relazioni"):
+        st.write("Aggiungi un nuovo nodo e/o una relazione.")
+        nome_parent = st.text_input("Nodo sorgente (parent):", "")
+        nome_nodo = st.text_input("Nodo destinazione (child):", "")
+        # Altri attributi personalizzati:
+        col_extra = [c for c in df.columns if c not in [PARENT_COL, CHILD_COL]]
+        extra_data = {}
+        for c in col_extra:
+            extra_data[c] = st.text_input(f"{c}:", "")
+        add_btn = st.button("Aggiungi nodo/relazione")
+
+        if add_btn and nome_parent and nome_nodo:
+            new_row = {PARENT_COL: nome_parent, CHILD_COL: nome_nodo}
+            new_row.update({k: v for k, v in extra_data.items() if v})
+            st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
+            st.success(f"Aggiunta relazione: {nome_parent} → {nome_nodo}")
+
+    # 3. Selezioni e visualizzazione grafo
     all_names = sorted(pd.unique(df[[PARENT_COL, CHILD_COL]].values.ravel("K")))
     selected_node = st.selectbox("Select a node:", all_names)
     view_mode = st.radio(
@@ -162,7 +196,6 @@ def main():
     partition = community_louvain.best_partition(G.to_undirected())
     H = filter_graph(G, selected_node, view_mode, partition, expand_neighbors)
 
-    # ------ Colonne grafo e cruscotto ------
     col1, col2 = st.columns([3, 2])
 
     with col1:
@@ -186,7 +219,6 @@ def main():
             st.markdown("- **Diametro (componente principale):** n/d")
         st.markdown(f"- **Numero community:** {len(set(partition.values()))}")
 
-        # Statistiche community selezionata o distribuzione community
         if view_mode == "Selected Node's Community" and selected_node in partition:
             comm_id = partition[selected_node]
             comm_nodes = [n for n in G.nodes if partition[n] == comm_id]
@@ -212,9 +244,7 @@ def main():
             ax.set_xlabel("Community")
             ax.set_ylabel("Numero nodi")
             st.pyplot(fig)
-    # ---------------------------------------
 
-    # Attributi nodo selezionato
     if selected_node in G.nodes:
         st.subheader(f"Attributi nodo: {selected_node}")
         node_data = G.nodes[selected_node]
@@ -222,11 +252,16 @@ def main():
     else:
         st.info("Seleziona un nodo per vedere gli attributi.")
 
-    # Tabella filtrata
     with st.expander("Mostra dati tabellari del sottografo attuale"):
         current_nodes = list(H.nodes)
         df_sub = df[df[PARENT_COL].isin(current_nodes) | df[CHILD_COL].isin(current_nodes)]
         st.dataframe(df_sub)
+
+    # Download del file attuale aggiornato
+    with st.sidebar.expander("Scarica il database attuale (Excel)"):
+        towrite = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        df.to_excel(towrite.name, index=False)
+        st.download_button("Scarica file Excel aggiornato", open(towrite.name, "rb"), file_name="network_data_edit.xlsx")
 
     captions = {
         "Betweenness Centrality": "Node color and size = betweenness centrality.",
