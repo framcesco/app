@@ -7,3 +7,4 @@ openpyxl
 matplotlib
 numpy
 scipy
+streamlit-vis-network
